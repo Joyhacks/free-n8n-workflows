@@ -1,0 +1,329 @@
+{
+  "name": "Lead Form to Google Sheets and Slack",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-form",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "9c0493d9-6e58-5b1a-84c5-2f2b08925a96",
+      "name": "Form webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "5fa74ce8-9046-5905-872d-a00f80020530"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "56bf70f2-73f8-5805-8fb9-04830a789dcc",
+              "name": "intake_secret",
+              "type": "string",
+              "value": "CHANGE_ME_to_a_long_random_string"
+            },
+            {
+              "id": "704b5b99-6b9d-58ed-9a92-4b080b603ff4",
+              "name": "sheet_id",
+              "type": "string",
+              "value": "YOUR_GOOGLE_SHEET_ID"
+            },
+            {
+              "id": "2f0f3c95-6dc8-5d0d-8823-a26d162b317e",
+              "name": "sheet_name",
+              "type": "string",
+              "value": "Leads"
+            },
+            {
+              "id": "b554fb32-37af-5cb7-a709-cd003b44c983",
+              "name": "slack_channel_id",
+              "type": "string",
+              "value": "C0000000000"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "09fd5691-899c-5a65-91c1-f9f33b6f7559",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate: checks the shared secret, drops bots, requires an email and maps\n// common form field names to one row.\nconst cfg = $('Config').first().json;\nconst req = $('Form webhook').first().json;\nconst body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};\nconst reject = (status, http_code, response) => [{ json: { status, http_code, response } }];\n\nconst secret = String(cfg.intake_secret || '');\nif (secret.length < 16 || secret.startsWith('CHANGE_ME')) return reject('misconfigured', 503, { ok: false, error: 'Form intake is not configured yet.' });\nconst given = String((req.headers || {})['x-webhook-secret'] || (req.query || {}).key || '');\nif (given !== secret) return reject('unauthorized', 401, { ok: false, error: 'Unauthorized.' });\n\nconst pick = (...keys) => {\n  for (const k of keys) {\n    const v = body[k];\n    if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();\n  }\n  return '';\n};\nif (pick('website_url', '_gotcha', 'hp_field')) return reject('spam', 200, { ok: true });\n\nconst email = pick('email', 'Email', 'email_address', 'emailAddress').toLowerCase().slice(0, 254);\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(email)) return reject('invalid', 422, { ok: false, errors: ['A valid email address is required.'] });\n\n// Spreadsheet apps run cells starting with = + - @ as formulas. Neutralise them.\nconst cell = (s, n) => {\n  const v = String(s).slice(0, n);\n  return /^[=+\\-@\\t\\r]/.test(v) ? \"'\" + v : v;\n};\nconst name = pick('name', 'full_name', 'fullName', 'Name') || [pick('first_name', 'firstName'), pick('last_name', 'lastName')].filter(Boolean).join(' ');\n\nreturn [{\n  json: {\n    status: 'new',\n    http_code: 200,\n    response: { ok: true },\n    row: {\n      Received: new Date().toISOString(),\n      Name: cell(name, 120),\n      Email: cell(email, 254),\n      Phone: cell(pick('phone', 'phone_number', 'phoneNumber', 'tel'), 40),\n      Company: cell(pick('company', 'company_name', 'companyName'), 200),\n      Message: cell(pick('message', 'Message', 'details', 'enquiry', 'inquiry', 'comments'), 2000),\n      Source: cell(pick('source', 'utm_source', 'page') || 'website', 120),\n    },\n  },\n}];\n"
+      },
+      "id": "1559d3da-903c-59bd-a612-d7e987cd5c17",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "b49aa527-b2a1-55fe-bf76-7a88a4a2c325",
+              "leftValue": "={{ $json.status }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "new"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f7568783-4f62-5f3b-a113-1e36f7a2ec09",
+      "name": "Valid lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "cb8fa6c8-8bd5-5818-9c78-aedeec63165c",
+      "name": "Respond: ok",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.http_code }}"
+        }
+      },
+      "id": "8db62f4f-e671-5af5-ac25-d674af5ccc35",
+      "name": "Respond: rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Config').first().json.sheet_name }}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Received": "={{ $json.row.Received }}",
+            "Name": "={{ $json.row.Name }}",
+            "Email": "={{ $json.row.Email }}",
+            "Phone": "={{ $json.row.Phone }}",
+            "Company": "={{ $json.row.Company }}",
+            "Message": "={{ $json.row.Message }}",
+            "Source": "={{ $json.row.Source }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "65a11321-d898-53f1-8c58-f8c28768b461",
+      "name": "Google Sheets: add row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1100,
+        200
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.slack_channel_id }}"
+        },
+        "text": "=:incoming_envelope: *New lead*: {{ $('Validate').first().json.row.Name || $('Validate').first().json.row.Email }}\n*Email:* {{ $('Validate').first().json.row.Email }}{{ $('Validate').first().json.row.Phone ? '\\n*Phone:* ' + $('Validate').first().json.row.Phone : '' }}{{ $('Validate').first().json.row.Company ? '\\n*Company:* ' + $('Validate').first().json.row.Company : '' }}\n>{{ ($('Validate').first().json.row.Message || '(no message)').slice(0, 500) }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "4437e47a-c8ce-5532-b877-2a568400caf3",
+      "name": "Slack: new lead",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.slack_channel_id }}"
+        },
+        "text": "=:warning: *Lead not saved to the sheet*. Add it by hand: {{ $('Validate').first().json.row.Name }} {{ $('Validate').first().json.row.Email }} {{ $('Validate').first().json.row.Phone }}\n>{{ $('Validate').first().json.row.Message.slice(0, 500) }}\n*Error:* {{ ($json.error && ($json.error.message || $json.error)) || 'see the execution' }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "fccf009c-c5e8-5f4a-8bd9-6ff13230ac4c",
+      "name": "Slack: sheet failed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Lead Form to Google Sheets and Slack\nAny website form posts here. Each lead lands in a Google Sheet and pings your Slack.\n\n- Requests need your secret (header `x-webhook-secret`, or `?key=` for form tools without headers). Unset secret = closed.\n- Bots that fill the hidden honeypot field get a silent OK.\n- Cells starting with = + - @ are escaped, so nobody can inject spreadsheet formulas.\n- If the sheet write fails, the lead goes to Slack so it isn't lost.\n\n**Setup:** make a sheet with a `Leads` tab and headers Received, Name, Email, Phone, Company, Message, Source. Fill **Config**, connect Google Sheets and Slack, point your form at the production URL.\n\nWant instant replies, AI lead scoring and CRM sync? See the Speed-to-Lead Engine at adeolaforgehq.com.",
+        "height": 440,
+        "width": 780,
+        "color": 7
+      },
+      "id": "48d58060-6ecd-553b-870f-9866ad4d6461",
+      "name": "Note 9",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -180
+      ]
+    }
+  ],
+  "connections": {
+    "Form webhook": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid lead?": {
+      "main": [
+        [
+          {
+            "node": "Respond: ok",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond: ok": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: add row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets: add row": {
+      "main": [
+        [
+          {
+            "node": "Slack: new lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack: sheet failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

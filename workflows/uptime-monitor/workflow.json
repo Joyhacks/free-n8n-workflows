@@ -1,0 +1,253 @@
+{
+  "name": "Uptime Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "0b72a5cd-0a65-5db0-a96d-6d4777129764",
+      "name": "Every 5 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a44dfbee-42cb-5d04-a795-254ceb218d8f",
+              "name": "sites",
+              "type": "string",
+              "value": "https://example.com\nhttps://example.com/pricing"
+            },
+            {
+              "id": "8a1b928f-4f45-5b44-96df-710f4e35a6a5",
+              "name": "failures_before_alert",
+              "type": "number",
+              "value": 2
+            },
+            {
+              "id": "ccb25873-b8ee-5746-81af-14b958a80b0e",
+              "name": "timeout_ms",
+              "type": "number",
+              "value": 10000
+            },
+            {
+              "id": "960cff6e-1d2a-57da-9a9d-3d10f1854c9e",
+              "name": "slack_channel_id",
+              "type": "string",
+              "value": "C0000000000"
+            },
+            {
+              "id": "c441fd48-c90d-5091-9289-56c91b811b47",
+              "name": "alert_email",
+              "type": "string",
+              "value": "you@yourcompany.com"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4e1ff820-ad36-5f87-ac61-f87110c3baf9",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sites to check: one URL per line in Config. Blank lines and # comments are skipped.\nconst raw = String($('Config').first().json.sites || '');\nconst urls = [...new Set(\n  raw.split(/\\r?\\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#')),\n)];\nconst bad = urls.filter((u) => !/^https?:\\/\\/[^\\s/]+/i.test(u));\nif (bad.length) throw new Error(`Config.sites has invalid URLs: ${bad.join(', ')}`);\nif (!urls.length) throw new Error('Config.sites is empty. Add one URL per line.');\nreturn urls.map((url) => ({ json: { url } }));\n"
+      },
+      "id": "a4e405d6-b3bd-5d4b-8c52-1623836d02a1",
+      "name": "Sites to check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": "={{ $('Config').first().json.timeout_ms }}",
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "8c1835d0-d191-586a-bc0b-ef099c19b2cf",
+      "name": "Check site",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detect changes: compares each check with the last known state and only\n// emits an alert when a site goes down (after N failures in a row) or recovers.\n// State lives in workflow static data, which n8n persists for active workflows.\nconst cfg = $('Config').first().json;\nconst sites = $('Sites to check').all().map((i) => i.json.url);\nconst results = $input.all().map((i) => i.json);\nconst threshold = Math.max(1, Number(cfg.failures_before_alert) || 2);\nconst store = $getWorkflowStaticData('global');\nstore.sites = store.sites || {};\nconst now = Date.now();\n\nconst mins = (ms) => {\n  const m = Math.round(ms / 60000);\n  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;\n};\n\nconst events = [];\nsites.forEach((url, i) => {\n  const r = results[i] || { error: { message: 'no result' } };\n  const code = Number(r.statusCode);\n  const up = !r.error && code >= 200 && code < 400;\n  const reason = r.error ? String(r.error.message || r.error.description || r.error).slice(0, 160) : `HTTP ${code}`;\n  const s = store.sites[url] || { status: 'up', fails: 0, since: now };\n\n  if (up) {\n    if (s.status === 'down') events.push({ type: 'recovered', url, text: `:large_green_circle: *Recovered* ${url} (was down ${mins(now - s.since)})`, plain: `RECOVERED  ${url}  (was down ${mins(now - s.since)})` });\n    store.sites[url] = { status: 'up', fails: 0, since: s.status === 'down' ? now : s.since };\n  } else {\n    s.fails += 1;\n    if (s.status === 'up' && s.fails >= threshold) {\n      s.status = 'down';\n      s.since = now;\n      events.push({ type: 'down', url, text: `:red_circle: *Down* ${url} (${reason}, ${s.fails} failed checks in a row)`, plain: `DOWN  ${url}  (${reason}, ${s.fails} failed checks in a row)` });\n    }\n    store.sites[url] = s;\n  }\n});\n\n// Forget sites removed from Config.\nfor (const url of Object.keys(store.sites)) if (!sites.includes(url)) delete store.sites[url];\n\nif (!events.length) return [];\nconst down = events.filter((e) => e.type === 'down').length;\nreturn [{\n  json: {\n    events,\n    text: events.map((e) => e.text).join('\\n'),\n    email: events.map((e) => e.plain).join('\\n'),\n    subject: down ? `${down} site(s) down` : `${events.length} site(s) recovered`,\n  },\n}];\n"
+      },
+      "id": "7122673c-e23a-5852-9565-4655fa261f78",
+      "name": "Detect changes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.slack_channel_id }}"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "e301c372-3373-5fbe-96a2-f3e27806f8c4",
+      "name": "Slack: alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Config').first().json.alert_email }}",
+        "subject": "={{ $('Detect changes').first().json.subject }}",
+        "message": "={{ $('Detect changes').first().json.email }}",
+        "emailType": "text",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "14ecc9ac-92d6-5bcd-afa4-3ea5cffd8919",
+      "name": "Gmail: alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1320,
+        300
+      ],
+      "webhookId": "746b8ea7-f994-5a9d-9aee-432bbdc24de4"
+    },
+    {
+      "parameters": {
+        "content": "## Uptime Monitor\nChecks your sites every 5 minutes and alerts on Slack and email when one goes down or comes back.\n\n- Alerts only on change, so no spam while a site stays down.\n- Waits for 2 failures in a row by default, so a single blip doesn't wake you.\n- Timeouts, DNS failures, SSL errors and any HTTP status of 400 or above count as down.\n\n**Setup:** list your URLs in **Config** (one per line), set the Slack channel ID and email, connect Slack and Gmail, then activate. State only persists on active workflows.",
+        "height": 380,
+        "width": 740,
+        "color": 7
+      },
+      "id": "ef538860-1d86-5ea7-98cd-fdd25a0379c7",
+      "name": "Note 7",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -120
+      ]
+    }
+  ],
+  "connections": {
+    "Every 5 minutes": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Sites to check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sites to check": {
+      "main": [
+        [
+          {
+            "node": "Check site",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check site": {
+      "main": [
+        [
+          {
+            "node": "Detect changes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect changes": {
+      "main": [
+        [
+          {
+            "node": "Slack: alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: alert": {
+      "main": [
+        [
+          {
+            "node": "Gmail: alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

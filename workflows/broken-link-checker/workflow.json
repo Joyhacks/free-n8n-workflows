@@ -1,0 +1,429 @@
+{
+  "name": "Broken Link Checker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "d045fa30-41fc-5641-b255-328b02a44b44",
+      "name": "Every Monday 7am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3c262673-e996-507b-9a1c-53770c72fa99",
+              "name": "sitemap_url",
+              "type": "string",
+              "value": "https://example.com/sitemap.xml"
+            },
+            {
+              "id": "52feed78-553e-5978-96bf-14fb0cb09864",
+              "name": "max_pages",
+              "type": "number",
+              "value": 200
+            },
+            {
+              "id": "139260a1-7d42-5815-a77e-73a1ea1458e7",
+              "name": "report_when_clean",
+              "type": "boolean",
+              "value": false
+            },
+            {
+              "id": "e921a33c-f525-5c00-8eb0-45536917385b",
+              "name": "slack_channel_id",
+              "type": "string",
+              "value": "C0000000000"
+            },
+            {
+              "id": "95a35cc0-fc6e-53c0-9c06-5e530c07c0e0",
+              "name": "alert_email",
+              "type": "string",
+              "value": "you@yourcompany.com"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1bd5e3a8-8604-5d64-995a-a0f34d035e7a",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').first().json.sitemap_url }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "3e6c97e9-ee7e-5e2d-bfbe-785e9ff4a570",
+      "name": "Fetch sitemap",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read sitemap: handles a normal sitemap (<urlset>) or a sitemap index\n// (<sitemapindex>), returning pages or child sitemaps to fetch.\nconst cfg = $('Config').first().json;\nconst res = $input.first().json;\nif (!res.statusCode || res.statusCode >= 400) {\n  throw new Error(`Sitemap ${cfg.sitemap_url} returned HTTP ${res.statusCode || 'error'}`);\n}\nconst xml = String(res.body || '');\nconst decode = (s) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&apos;/g, \"'\");\nconst locs = [...xml.matchAll(/<loc>\\s*(?:<!\\[CDATA\\[)?\\s*([^<\\]]+?)\\s*(?:\\]\\]>)?\\s*<\\/loc>/gi)].map((m) => decode(m[1].trim()));\nconst urls = [...new Set(locs.filter((u) => /^https?:\\/\\//i.test(u)))];\nif (!urls.length) throw new Error(`No URLs found in ${cfg.sitemap_url}. Is it a valid sitemap?`);\n\nconst isIndex = /<sitemapindex[\\s>]/i.test(xml);\nconst max = Math.max(1, Number(cfg.max_pages) || 200);\nreturn (isIndex ? urls.slice(0, 50) : urls.slice(0, max)).map((url) => ({ json: { url, kind: isIndex ? 'sitemap' : 'page' } }));\n"
+      },
+      "id": "4fb8fa6f-6216-5403-b1d8-c6dfc3ef42a7",
+      "name": "Read sitemap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "25e240f7-6954-581a-bd88-60bc95ef6754",
+              "leftValue": "={{ $json.kind }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "sitemap"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3803f36a-22dc-565d-8e20-8561f4ee7b05",
+      "name": "Sitemap index?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "22b5acd3-63da-58fd-9271-cc6ab43fc781",
+      "name": "Fetch child sitemaps",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read child sitemaps: collects page URLs from every child sitemap of an index.\nconst cfg = $('Config').first().json;\nconst max = Math.max(1, Number(cfg.max_pages) || 200);\nconst decode = (s) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&apos;/g, \"'\");\nconst pages = new Set();\nfor (const item of $input.all()) {\n  const r = item.json;\n  if (!r.statusCode || r.statusCode >= 400) continue;\n  for (const m of String(r.body || '').matchAll(/<loc>\\s*(?:<!\\[CDATA\\[)?\\s*([^<\\]]+?)\\s*(?:\\]\\]>)?\\s*<\\/loc>/gi)) {\n    const u = decode(m[1].trim());\n    if (/^https?:\\/\\//i.test(u)) pages.add(u);\n    if (pages.size >= max) break;\n  }\n  if (pages.size >= max) break;\n}\nif (!pages.size) throw new Error('The sitemap index had no readable child sitemaps.');\nreturn [...pages].map((url) => ({ json: { url, kind: 'page' } }));\n"
+      },
+      "id": "dcd9eb5d-3706-5195-8f48-e2c976859707",
+      "name": "Read child sitemaps",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Joins both paths so the report can pair pages with results.\nreturn $input.all();\n"
+      },
+      "id": "f4712256-d47b-59d8-9fce-96ba4797caa8",
+      "name": "Pages to check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "id": "a180426a-ff13-54c5-b8d1-d4f72d365b5b",
+      "name": "Check page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build report: pairs each checked page with its result and lists the broken ones.\nconst cfg = $('Config').first().json;\nconst pages = $('Pages to check').all().map((i) => i.json.url);\nconst results = $input.all().map((i) => i.json);\n\nconst broken = [];\npages.forEach((url, i) => {\n  const r = results[i] || { error: { message: 'no result' } };\n  const code = Number(r.statusCode);\n  if (r.error) broken.push({ url, why: String(r.error.message || r.error.description || r.error).slice(0, 120) });\n  else if (!(code >= 200 && code < 400)) broken.push({ url, why: `HTTP ${code}` });\n});\n\nif (!broken.length && cfg.report_when_clean !== true) return [];\n\nconst site = (() => { try { return new URL(cfg.sitemap_url).host; } catch { return cfg.sitemap_url; } })();\nconst lines = broken.slice(0, 50).map((b) => `- ${b.why}  ${b.url}`);\nif (broken.length > 50) lines.push(`...and ${broken.length - 50} more`);\nconst headline = broken.length\n  ? `${broken.length} broken page(s) on ${site}, out of ${pages.length} checked`\n  : `All ${pages.length} pages on ${site} are healthy`;\n\nreturn [{\n  json: {\n    broken_count: broken.length,\n    checked: pages.length,\n    subject: headline,\n    text: `${broken.length ? ':warning:' : ':white_check_mark:'} *${headline}*${lines.length ? '\\n' + lines.join('\\n') : ''}`,\n    email: `${headline}\\n\\n${lines.join('\\n')}\\n\\nBroken pages hurt rankings and lose visitors. Fix or redirect each one, then update the sitemap.`,\n  },\n}];\n"
+      },
+      "id": "23ea9913-f1e2-5280-a969-552275c56b16",
+      "name": "Build report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.slack_channel_id }}"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "f8993ad9-aab5-50a2-80ac-4b88f1d97447",
+      "name": "Slack: report",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Config').first().json.alert_email }}",
+        "subject": "={{ $('Build report').first().json.subject }}",
+        "message": "={{ $('Build report').first().json.email }}",
+        "emailType": "text",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "b454d5d4-d817-5c4a-a89c-0ce6030a4845",
+      "name": "Gmail: report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2420,
+        300
+      ],
+      "webhookId": "dd04e1b9-335b-5f03-adff-97c7d76fefac"
+    },
+    {
+      "parameters": {
+        "content": "## Broken Link Checker\nEvery Monday it reads your sitemap, opens every page and reports anything broken to Slack and email.\n\n- Handles normal sitemaps and sitemap indexes (Yoast, Rank Math, Next.js, most site builders).\n- Checks 5 pages at a time with a pause between batches, so it never hammers your server.\n- Quiet when everything is fine. Set `report_when_clean` to true for a weekly all-clear.\n\n**Setup:** set `sitemap_url` in **Config**, the Slack channel ID and email, connect Slack and Gmail, activate.",
+        "height": 400,
+        "width": 760,
+        "color": 7
+      },
+      "id": "28ee2695-a4b6-584f-a577-4e7f07e66df2",
+      "name": "Note 12",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -140
+      ]
+    }
+  ],
+  "connections": {
+    "Every Monday 7am": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Fetch sitemap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch sitemap": {
+      "main": [
+        [
+          {
+            "node": "Read sitemap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read sitemap": {
+      "main": [
+        [
+          {
+            "node": "Sitemap index?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sitemap index?": {
+      "main": [
+        [
+          {
+            "node": "Fetch child sitemaps",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pages to check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch child sitemaps": {
+      "main": [
+        [
+          {
+            "node": "Read child sitemaps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read child sitemaps": {
+      "main": [
+        [
+          {
+            "node": "Pages to check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pages to check": {
+      "main": [
+        [
+          {
+            "node": "Check page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check page": {
+      "main": [
+        [
+          {
+            "node": "Build report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build report": {
+      "main": [
+        [
+          {
+            "node": "Slack: report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: report": {
+      "main": [
+        [
+          {
+            "node": "Gmail: report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

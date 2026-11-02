@@ -1,0 +1,170 @@
+{
+  "name": "Error Alerts for n8n",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "b4b61d13-33a1-5cb1-8ad3-8479460c75ec",
+      "name": "On workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3221c010-bf9c-53db-8dc4-587a6e9cf896",
+              "name": "slack_channel_id",
+              "type": "string",
+              "value": "C0000000000"
+            },
+            {
+              "id": "873ce0a1-b12d-5b34-83ec-bb825dfb1ed0",
+              "name": "alert_email",
+              "type": "string",
+              "value": "you@yourcompany.com"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dadbe328-7d91-59e4-9c2b-3298e2843866",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format alert: turns n8n's error payload into a readable alert.\n// Handles both execution errors and trigger errors (which have no execution).\nconst e = $('On workflow error').first().json;\nconst ex = e.execution || {};\nconst err = ex.error || (e.trigger && e.trigger.error) || {};\nconst workflow = (e.workflow && e.workflow.name) || 'Unknown workflow';\nconst node = ex.lastNodeExecuted || (err.node && err.node.name) || (e.trigger ? 'trigger' : 'unknown');\nconst message = String(err.message || err.description || 'No error message').replace(/\\s+/g, ' ').slice(0, 500);\nconst when = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';\nconst mode = ex.mode ? ` (${ex.mode})` : '';\nconst link = ex.url ? `\\n<${ex.url}|Open the failed run>` : '';\n\nreturn [{\n  json: {\n    subject: `n8n failure: ${workflow}`,\n    slack: `:rotating_light: *${workflow}* failed at *${node}*${mode}\\n>${message}${link}`,\n    email: `Workflow: ${workflow}\\nFailed node: ${node}${mode}\\nWhen: ${when}\\nError: ${message}\\n${ex.url ? `\\nOpen the run: ${ex.url}` : '\\nThis was a trigger error, so there is no saved run. Open the workflow in n8n to see it.'}`,\n  },\n}];\n"
+      },
+      "id": "43724afe-7dbe-5a84-a12b-34d2ae1bdfd5",
+      "name": "Format alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.slack_channel_id }}"
+        },
+        "text": "={{ $json.slack }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "87383bb8-67a7-59d6-97b3-f48550c99b95",
+      "name": "Slack: alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Config').first().json.alert_email }}",
+        "subject": "={{ $('Format alert').first().json.subject }}",
+        "message": "={{ $('Format alert').first().json.email }}",
+        "emailType": "text",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "076014a1-753c-56c5-9110-7d1e9a478e62",
+      "name": "Gmail: alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        300
+      ],
+      "webhookId": "c6a53d4a-2186-5264-bd21-f83a057cc965",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## Error Alerts for n8n\nOne error workflow for all your workflows. When any of them fails you get a Slack message and an email with the workflow, the failed node, the error and a link to the run.\n\nSlack runs first. Email always follows, so a Slack outage can't hide a failure.\n\n**Setup:** fill **Config**, connect Slack and Gmail. Then in each workflow you care about: Settings > Error workflow > *Error Alerts for n8n*. No need to activate this one.",
+        "height": 400,
+        "width": 680,
+        "color": 7
+      },
+      "id": "1659013d-488e-5c61-9016-f44b233ab57b",
+      "name": "Note 5",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -140
+      ]
+    }
+  ],
+  "connections": {
+    "On workflow error": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Format alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format alert": {
+      "main": [
+        [
+          {
+            "node": "Slack: alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: alert": {
+      "main": [
+        [
+          {
+            "node": "Gmail: alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

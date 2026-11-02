@@ -1,0 +1,355 @@
+{
+  "name": "AI News Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "228a3fe1-e1e7-56b3-97f7-76c665580be2",
+      "name": "Every morning",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fef61d6a-ddc5-5297-97b2-d450b5f59031",
+              "name": "feeds",
+              "type": "string",
+              "value": "https://hnrss.org/frontpage\nhttps://www.theverge.com/rss/index.xml"
+            },
+            {
+              "id": "b53ea6c4-2ebc-53fd-b1b7-6605f57a7058",
+              "name": "focus",
+              "type": "string",
+              "value": "AI tools, automation and anything useful for running a small software studio"
+            },
+            {
+              "id": "0eb01709-03f6-55a1-bdef-3e004696c989",
+              "name": "digest_title",
+              "type": "string",
+              "value": "Daily briefing"
+            },
+            {
+              "id": "e8d86fe7-7499-5b17-b14c-5b00d0776fa6",
+              "name": "lookback_hours",
+              "type": "number",
+              "value": 26
+            },
+            {
+              "id": "8b7ca4b4-f859-57ce-aa28-aa8d60f9ce49",
+              "name": "max_items",
+              "type": "number",
+              "value": 25
+            },
+            {
+              "id": "c0446052-5c30-5b1a-a227-7cf56b86faee",
+              "name": "slack_channel_id",
+              "type": "string",
+              "value": "C0000000000"
+            },
+            {
+              "id": "73c21712-837b-5ab8-8321-86feb81b59a9",
+              "name": "alert_email",
+              "type": "string",
+              "value": "you@yourcompany.com"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "43092b0a-abda-5d13-a250-e92efbcc567e",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Feeds: one feed URL per line in Config.\nconst raw = String($('Config').first().json.feeds || '');\nconst urls = [...new Set(raw.split(/\\r?\\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#')))];\nconst bad = urls.filter((u) => !/^https?:\\/\\//i.test(u));\nif (bad.length) throw new Error(`Config.feeds has invalid URLs: ${bad.join(', ')}`);\nif (!urls.length) throw new Error('Config.feeds is empty. Add one RSS or Atom feed URL per line.');\nreturn urls.map((url) => ({ json: { url } }));\n"
+      },
+      "id": "a3a37a64-a55e-5f60-9a48-428ed81bc5a9",
+      "name": "Feeds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "ignoreSSL": false
+        }
+      },
+      "id": "b64cdf97-418d-512a-8978-9814fc4b08d2",
+      "name": "Read feed",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// New items: keeps recent articles not sent before, newest first.\n// Feeds that failed to load arrive as items with an \"error\" field and are skipped.\nconst cfg = $('Config').first().json;\nconst store = $getWorkflowStaticData('global');\nstore.sent = store.sent || {};\nconst now = Date.now();\nconst windowMs = Math.max(1, Number(cfg.lookback_hours) || 26) * 3600 * 1000;\nfor (const [k, t] of Object.entries(store.sent)) if (now - t > 14 * 24 * 3600 * 1000) delete store.sent[k];\n\nconst clean = (s, n) => String(s || '').replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, n);\nconst items = [];\nconst seen = new Set();\nfor (const { json: it } of $input.all()) {\n  if (it.error || !it.link || !it.title) continue;\n  const t = Date.parse(it.isoDate || it.pubDate || '');\n  if (!Number.isFinite(t) || now - t > windowMs || t - now > 3600 * 1000) continue;\n  const link = String(it.link).split('#')[0];\n  if (seen.has(link) || store.sent[link]) continue;\n  seen.add(link);\n  let source = '';\n  try { source = new URL(link).hostname.replace(/^www\\./, ''); } catch { /* keep blank */ }\n  items.push({ t, title: clean(it.title, 200), link, source, snippet: clean(it.contentSnippet || it.content || it.summary, 400) });\n}\nif (!items.length) return [];\n\nitems.sort((a, b) => b.t - a.t);\nconst picked = items.slice(0, Math.max(1, Number(cfg.max_items) || 25));\nfor (const i of picked) store.sent[i.link] = now;\n\nconst list = picked.map((i, n) => `${n + 1}. ${i.title} (${i.source})\\n${i.snippet}\\n${i.link}`).join('\\n\\n');\nreturn [{\n  json: {\n    count: picked.length,\n    list,\n    fallback: picked.map((i) => `- <${i.link}|${i.title.replace(/[<>|]/g, '')}> (${i.source})`).join('\\n'),\n  },\n}];\n"
+      },
+      "id": "48852f90-9329-5247-a764-e542e1e0b3dc",
+      "name": "New items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.list }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You write a short morning briefing for one busy reader. Their focus: {{ $('Config').first().json.focus }}.\n\nFrom the numbered articles, pick up to 7 that matter most to that focus. Skip the rest.\nFor each pick, write one line: what happened and why it matters to this reader, then the link in Slack format <url|short title>.\nPlain, specific language. No intro, no sign-off, no hype words. Use only facts present in the articles."
+            }
+          ]
+        }
+      },
+      "id": "d4c12732-11c6-5bfd-a49f-526790ecef0e",
+      "name": "AI: write digest",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        1100,
+        300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "ccc63bc0-f6c2-5e93-b3e2-38bff7ebf819",
+      "name": "OpenAI model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1040,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format message: uses the AI digest when it worked, otherwise a plain list,\n// so the briefing still arrives when the model is down.\nconst cfg = $('Config').first().json;\nconst src = $('New items').first().json;\nconst ai = $input.first().json;\nconst date = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });\nconst title = `${cfg.digest_title || 'Daily briefing'}, ${date}`;\n\nconst body = typeof ai.text === 'string' && ai.text.trim().length > 40\n  ? ai.text.trim().slice(0, 3500)\n  : `${src.fallback}\\n\\n_(AI summary unavailable today, showing headlines.)_`;\n\n// Email version: Slack links <url|title> become \"title: url\", bold markers go.\nconst email = body.replace(/<(https?:[^|>]+)\\|([^>]+)>/g, '$2: $1').replace(/(^|\\s)\\*([^*\\n]+)\\*/g, '$1$2').replace(/^_\\((.*)\\)_$/m, '($1)');\nreturn [{ json: { title, text: `*${title}*\\n\\n${body}`, email: `${title}\\n\\n${email}` } }];\n"
+      },
+      "id": "47c0d2d6-93bf-5de1-935d-3924586d93e1",
+      "name": "Format message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.slack_channel_id }}"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "acaaa54e-ee4b-5445-9cbb-00e733582659",
+      "name": "Slack: digest",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Config').first().json.alert_email }}",
+        "subject": "={{ $('Format message').first().json.title }}",
+        "message": "={{ $('Format message').first().json.email }}",
+        "emailType": "text",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "5b6f516d-e3b0-5333-a787-a7b52bb63856",
+      "name": "Gmail: digest",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1760,
+        300
+      ],
+      "webhookId": "1c66c0c4-c3e2-51ef-b220-5f09f9a7d09c"
+    },
+    {
+      "parameters": {
+        "content": "## AI News Digest\nEvery morning it reads your RSS feeds, keeps what's new since yesterday, and has AI pick the 7 stories that matter to *you*, with one line each on why.\n\n- Never sends the same article twice.\n- A broken feed is skipped, not fatal.\n- If the AI call fails, you still get the headlines.\n- About 1 cent a day on gpt-4o-mini.\n\n**Setup:** add feed URLs and describe your `focus` in **Config**, connect OpenAI, Slack and Gmail (delete either alert node if you only want one), activate.",
+        "height": 420,
+        "width": 760,
+        "color": 7
+      },
+      "id": "346feb5b-c8f5-5c46-a7a2-9802851eb99f",
+      "name": "Note 10",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -160
+      ]
+    }
+  ],
+  "connections": {
+    "Every morning": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Feeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Feeds": {
+      "main": [
+        [
+          {
+            "node": "Read feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read feed": {
+      "main": [
+        [
+          {
+            "node": "New items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New items": {
+      "main": [
+        [
+          {
+            "node": "AI: write digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI: write digest",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: write digest": {
+      "main": [
+        [
+          {
+            "node": "Format message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format message": {
+      "main": [
+        [
+          {
+            "node": "Slack: digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: digest": {
+      "main": [
+        [
+          {
+            "node": "Gmail: digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
