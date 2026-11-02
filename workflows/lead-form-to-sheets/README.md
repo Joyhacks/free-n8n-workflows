@@ -22,15 +22,14 @@ curl -X POST "https://YOUR-N8N/webhook/lead-form" \
   -d '{"name":"Test Lead","email":"test@example.com","message":"Hello"}'
 ```
 
-## What it protects against
+## Behaviour
 
-- **No secret, no entry.** Wrong secret gets 401. If you never set one, it stays closed (503).
-- **Bots.** Add a hidden field named `website_url` to your form. Bots fill it and get a silent OK. People never see it.
-- **Spreadsheet formula injection.** A "name" like `=HYPERLINK(...)` is stored as text, not run as a formula.
-- **Lost leads.** If the sheet write fails, the full lead goes to Slack instead.
+Requests without the right secret get a 401. If `intake_secret` is still the default, every request gets a 503, so a half-configured workflow never accepts data.
+
+Add a hidden field named `website_url` to your form as a honeypot. Bots fill it and get a 200 with nothing saved.
+
+Values starting with `=`, `+`, `-` or `@` are prefixed with `'` so the sheet stores them as text instead of running them as formulas.
+
+If the sheet write fails after three tries, the full lead is posted to Slack so it isn't lost.
 
 Field names it understands: `name` (or `first_name` and `last_name`), `email`, `phone`, `company`, `message`, `source`.
-
-## Want more than a spreadsheet?
-
-The **Speed-to-Lead Engine** replies to every lead in under a minute, scores them with AI, syncs HubSpot and alerts you only for the hot ones. [adeolaforgehq.com](https://adeolaforgehq.com)

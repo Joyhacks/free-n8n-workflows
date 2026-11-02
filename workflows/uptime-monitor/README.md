@@ -13,9 +13,9 @@ Checks your sites every 5 minutes. Alerts on Slack and email when one goes down,
 
 ## How it decides
 
-- **Down** means a timeout, DNS failure, SSL error or any status 400 and above. Redirects are followed, so 301 to a working page counts as up.
+- A site counts as down on a timeout, DNS failure, SSL error or any status 400 and above. Redirects are followed, so 301 to a working page counts as up.
 - It waits for `failures_before_alert` failures in a row (default 2) before alerting, so a single slow response doesn't page you.
 - One alert when a site goes down. One when it recovers, with how long it was out. No repeats while it stays down.
 - Remove a URL from Config and its state is cleaned up on the next run.
 
-Want it every minute? Change the schedule node. On n8n Cloud, check your execution quota first: every 5 minutes is about 8,600 runs a month.
+To check more often, change the schedule node. On n8n Cloud, mind the execution quota: every 5 minutes is about 8,600 runs a month.

@@ -225,7 +225,7 @@
     },
     {
       "parameters": {
-        "content": "## Lead Form to Google Sheets and Slack\nAny website form posts here. Each lead lands in a Google Sheet and pings your Slack.\n\n- Requests need your secret (header `x-webhook-secret`, or `?key=` for form tools without headers). Unset secret = closed.\n- Bots that fill the hidden honeypot field get a silent OK.\n- Cells starting with = + - @ are escaped, so nobody can inject spreadsheet formulas.\n- If the sheet write fails, the lead goes to Slack so it isn't lost.\n\n**Setup:** make a sheet with a `Leads` tab and headers Received, Name, Email, Phone, Company, Message, Source. Fill **Config**, connect Google Sheets and Slack, point your form at the production URL.\n\nWant instant replies, AI lead scoring and CRM sync? See the Speed-to-Lead Engine at adeolaforgehq.com.",
+        "content": "## Lead Form to Google Sheets and Slack\nAny website form posts here. Each lead lands in a Google Sheet and pings your Slack.\n\n- Requests need your secret (header `x-webhook-secret`, or `?key=` for form tools without headers). Unset secret = closed.\n- Bots that fill the hidden honeypot field get a silent OK.\n- Cells starting with = + - @ are escaped, so nobody can inject spreadsheet formulas.\n- If the sheet write fails, the lead goes to Slack so it isn't lost.\n\n**Setup:** make a sheet with a `Leads` tab and headers Received, Name, Email, Phone, Company, Message, Source. Fill **Config**, connect Google Sheets and Slack, point your form at the production URL.",
         "height": 440,
         "width": 780,
         "color": 7

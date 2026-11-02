@@ -1,44 +1,43 @@
-# Free n8n Workflows
+# free-n8n-workflows
 
-Five n8n workflows that do one job each and do it properly. Free, MIT licensed, ready to import.
+Five n8n workflows for jobs most small teams need covered. Each one is a single `workflow.json` you can import.
 
 | Workflow | What it does | Needs |
 |---|---|---|
-| [Uptime Monitor](workflows/uptime-monitor) | Checks your sites every 5 minutes. Alerts once when one goes down, once when it's back | Slack, Gmail |
-| [Broken Link Checker](workflows/broken-link-checker) | Crawls your sitemap every Monday and reports broken pages | Slack, Gmail |
-| [Lead Form to Sheets](workflows/lead-form-to-sheets) | Any website form to a Google Sheet row plus a Slack ping | Google Sheets, Slack |
-| [AI News Digest](workflows/rss-ai-digest) | Your RSS feeds, filtered by AI to what matters to you, every morning | OpenAI, Slack, Gmail |
-| [Error Alerts for n8n](workflows/error-alerts) | Slack and email the moment any of your workflows fails | Slack, Gmail |
+| [uptime-monitor](workflows/uptime-monitor) | Checks a list of URLs every 5 minutes, alerts when a site goes down and again when it recovers | Slack, Gmail |
+| [broken-link-checker](workflows/broken-link-checker) | Weekly crawl of your sitemap, reports pages that return errors | Slack, Gmail |
+| [lead-form-to-sheets](workflows/lead-form-to-sheets) | Website form submissions to a Google Sheet row and a Slack message | Google Sheets, Slack |
+| [rss-ai-digest](workflows/rss-ai-digest) | Morning digest of your RSS feeds, filtered by an LLM against a topic you describe | OpenAI, Slack, Gmail |
+| [error-alerts](workflows/error-alerts) | Error workflow for all your other workflows: Slack plus email with a link to the failed run | Slack, Gmail |
 
-## Why these and not the other 8,000 templates
+## Using one
 
-Most free n8n templates are demos. They work once on the author's machine and break on yours. These were built for production:
+Download the folder's `workflow.json`, then in n8n go to **Workflows > Import from File**. Every setting lives in the workflow's **Config** node, so fill that in, add the credentials n8n asks for, and activate. Each folder's README covers setup and behaviour in more detail.
 
-- **They fail loudly, not silently.** Bad config throws a clear error. Broken feeds, timeouts and failed sheet writes are handled on purpose, and anything that can't be handled reaches the error alert workflow.
-- **They don't spam you.** The uptime monitor alerts on change only, with a failure threshold. The link checker is quiet when everything's fine.
-- **They're safe to point at the internet.** The form workflow needs a secret, ignores bots and blocks spreadsheet formula injection.
-- **They're tested.** The logic in every Code node lives in `workflows/*/src` and is covered by automated tests. `build.py` embeds those exact files into the workflow JSON, so what you import is what was tested.
-- **No credentials, no pinned test data, no leftover IDs** in any file.
+Built for n8n 1.x, Cloud or self-hosted. Set up [error-alerts](workflows/error-alerts) first and point the others at it.
 
-## Use one
+## Design notes
 
-1. Download the `workflow.json` from its folder.
-2. In n8n: **Workflows > Import from File**.
-3. Fill in the **Config** node (every setting lives there), connect the credentials n8n asks for, activate.
+A few choices that apply across all five:
 
-Each folder's README has the full setup and the details of how it behaves. Works on n8n Cloud and self-hosted n8n 1.x.
+- Configuration is in one Set node per workflow, so nothing is hardcoded across several nodes.
+- Bad configuration throws a clear error rather than running with defaults. Failures a workflow can recover from (a dead feed, a timeout on one URL, a failed sheet write) are handled in the workflow. Anything else reaches the error workflow.
+- The uptime monitor and link checker only message you when something changes or is broken. The uptime monitor waits for consecutive failures before alerting.
+- The lead form checks a shared secret, ignores honeypot submissions, and prefixes cell values starting with `=`, `+`, `-` or `@` so they can't run as spreadsheet formulas.
+- Where Slack and email both send, Slack is set to continue on error so the email still goes out.
+- The exported JSON has no credentials, pinned execution data or instance IDs.
 
-Start with [Error Alerts](workflows/error-alerts). It makes every other workflow you run safer.
+## How the repo is built
 
-## For developers
+The JavaScript in each workflow's Code nodes lives in `workflows/<name>/src/` and is unit tested against a mocked n8n runtime (`$`, `$input`, `$getWorkflowStaticData`). `build.py` generates every `workflow.json` and embeds those files unchanged, so the code you import is the code that was tested. A second test file checks the generated workflows: connections, node references, error outputs, and that every Config field the code reads exists.
 
 ```bash
-node --test tests/*.test.mjs   # 56 tests: Code node logic and workflow structure
-python3 build.py               # regenerate workflow.json files from src/
+node --test tests/*.test.mjs   # 56 tests
+python3 build.py               # regenerate workflow.json files
 ```
 
-## Need something bigger?
+CI runs the tests and fails if the committed `workflow.json` files don't match a fresh build.
 
-These are free because they're the easy 20%. If you need lead handling that replies to every enquiry in under a minute, AI scoring, CRM sync, or an automation built around how your business actually runs, that's what I do at [adeolaforgehq.com](https://adeolaforgehq.com).
+## License
 
-MIT licensed. Built by [Adeola Ilori](https://github.com/Joyhacks).
+MIT. Written by [Adeola Ilori](https://github.com/Joyhacks). I build larger automations for businesses at [adeolaforgehq.com](https://adeolaforgehq.com).

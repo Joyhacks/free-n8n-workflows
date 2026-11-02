@@ -190,9 +190,7 @@ Any website form posts here. Each lead lands in a Google Sheet and pings your Sl
 - Cells starting with = + - @ are escaped, so nobody can inject spreadsheet formulas.
 - If the sheet write fails, the lead goes to Slack so it isn't lost.
 
-**Setup:** make a sheet with a `Leads` tab and headers Received, Name, Email, Phone, Company, Message, Source. Fill **Config**, connect Google Sheets and Slack, point your form at the production URL.
-
-Want instant replies, AI lead scoring and CRM sync? See the Speed-to-Lead Engine at adeolaforgehq.com.""", 7)
+**Setup:** make a sheet with a `Leads` tab and headers Received, Name, Email, Phone, Company, Message, Source. Fill **Config**, connect Google Sheets and Slack, point your form at the production URL.""", 7)
 w.write()
 
 # ---------------------------------------------------------------- rss digest
